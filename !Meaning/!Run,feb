@@ -1,0 +1,4 @@
+| !Meaning/!Run
+WimpSlot -min 64K -max 64K
+Set Alias$RunImage <Obey$Dir>.!RunImage
+Run <Obey$Dir>.!RunImage

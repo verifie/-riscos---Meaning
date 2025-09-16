@@ -1,0 +1,227 @@
+REM !Meaning.!RunImage — BBC BASIC WIMP app (no !Templates)
+REM - Main window with 3-line prompt, input box, 'Check' action button
+REM - Close via the main window cross
+REM - Modal message dialog window (OK button), no OS_Confirm / Wimp_ReportError needed
+
+ON ERROR PROCfatal
+
+REM ---- persistent workspace -------------------------------------------------
+DIM win%   512          : REM main window + icons
+DIM ev%    512          : REM Wimp_Poll block (increased for safety)
+DIM state% 64           : REM Window state block
+DIM strs%  4096         : REM String buffer (increased to avoid overlap)
+
+finished% = FALSE
+
+task$     = "Meaning"
+title%    = strs% +    0 : $(title%)    = task$ + CHR$(0)                      : REM 0-255
+p1%       = strs% +  256 : $(p1%)       = "What is the meaning of life," + CHR$(0) : REM 256-511
+p2%       = strs% +  512 : $(p2%)       = "the universe and" + CHR$(0)         : REM 512-767
+p3%       = strs% +  768 : $(p3%)       = "everything?" + CHR$(0)              : REM 768-1023
+inbuf%    = strs% + 1024 : $(inbuf%)    = CHR$(0) : INLEN% = 64               : REM 1024-1279
+checktxt% = strs% + 1280 : $(checktxt%) = "Check" + CHR$(0)                    : REM 1280-1535
+
+REM ---- start the Wimp ------------------------------------------------------
+SYS "Wimp_Initialise", 310, &4B534154, title% TO wimpver%, task%
+
+REM ---- main window (roomy) -------------------------------------------------
+win%!0  = 0 : win%!4  = 0 : win%!8  = 680 : win%!12 = 220
+win%!16 = 0 : win%!20 = 0 : win%!24 = -1
+win%!28 = %10000110000000000011000000010010   : REM move, title, close, newfmt, auto-redraw
+win%!32 = &01070207 : win%!36 = &000C0103
+win%!40 = 0 : win%!44 = -220 : win%!48 = 680 : win%!52 = 0
+
+REM Title (indirected)
+win%!56 = (&27<<24) + %100111101
+win%!60 = 0 : win%!64 = 1 : win%!68 = 0
+win%!72 = title% : win%!76 = -1 : win%!80 = 64
+
+REM Icons: 3 prompts + input + Check
+win%!84 = 5
+icon% = win% + 88
+
+REM Prompt 1
+icon%!0=16 : icon%!4=-28 : icon%!8=664 : icon%!12=-8
+icon%!16=(&17<<24) + %1100010001
+icon%!20=p1% : icon%!24=-1 : icon%!28=64
+
+icon% += 32
+REM Prompt 2
+icon%!0=16 : icon%!4=-56 : icon%!8=664 : icon%!12=-36
+icon%!16=(&17<<24) + %1100010001
+icon%!20=p2% : icon%!24=-1 : icon%!28=64
+
+icon% += 32
+REM Prompt 3
+icon%!0=16 : icon%!4=-84 : icon%!8=664 : icon%!12=-64
+icon%!16=(&17<<24) + %1100010001
+icon%!20=p3% : icon%!24=-1 : icon%!28=32
+
+icon% += 32
+REM Input (indirected)
+icon%!0=16 : icon%!4=-156 : icon%!8=370 : icon%!12=-116
+icon%!16=(&07<<24) + (15<<12) + %100111101
+icon%!20=inbuf% : icon%!24=-1 : icon%!28=INLEN%
+
+icon% += 32
+REM "Check" action button (plain text, increased buffer length)
+icon%!0=400 : icon%!4=-140 : icon%!8=500 : icon%!12=-100
+icon%!16=(&17<<24) + (3<<12) + %100111101
+icon%!20=checktxt% : icon%!24=0 : icon%!28=16
+
+REM ---- create, centre, open main window -----------------------------------
+SYS "Wimp_CreateWindow",, win% TO winh%
+
+!state% = winh%
+SYS "Wimp_GetWindowState",, state%
+SYS "OS_ReadModeVariable", -1, 4  TO ,, xeig%
+SYS "OS_ReadModeVariable", -1, 5  TO ,, yeig%
+SYS "OS_ReadModeVariable", -1, 11 TO ,, xres%
+SYS "OS_ReadModeVariable", -1, 12 TO ,, yres%
+
+scrx% = ((xres% + 1) << xeig%)
+scry% = ((yres% + 1) << yeig%)
+w% = state%!12 - state%!4 : h% = state%!16 - state%!8
+state%!4  = (scrx% - w%) DIV 2
+state%!8  = (scry% - h%) DIV 2
+state%!12 = state%!4 + w%
+state%!16 = state%!8 + h%
+state%!28 = -1
+SYS "Wimp_OpenWindow",, state%
+
+SYS "Wimp_SetCaretPosition", winh%, 3, 0, 0, 16, 0
+
+REM ---- event loop ----------------------------------------------------------
+REPEAT
+  SYS "Wimp_Poll", 0, ev% TO reason%
+  CASE reason% OF
+    WHEN 1 : PROCredraw(ev%)
+    WHEN 2 : SYS "Wimp_OpenWindow",, ev%
+    WHEN 3 : IF ev%!12 = winh% THEN finished% = TRUE         : REM close icon
+    WHEN 6 : PRINT "Mouse click: Window=";ev%!12;" Icon=";ev%!16 : PROCclick(ev%)
+  ENDCASE
+UNTIL finished%
+
+SYS "Wimp_CloseDown", task%
+END
+
+REM ================= handlers ==============================================
+
+DEF PROCredraw(b%)
+LOCAL more% : SYS "Wimp_RedrawWindow",, b% TO more%
+WHILE more% : SYS "Wimp_GetRectangle",, b% TO more% : ENDWHILE
+ENDPROC
+
+DEF PROCclick(b%)
+LOCAL w%, ic%
+w%  = b%!12            : REM window handle (Mouse_Click block)
+ic% = b%!16            : REM icon (or -1)
+PRINT "Click detected: Window=";w%;" Icon=";ic%  : REM Debug output
+IF w% <> winh% THEN ENDPROC
+IF ic% <> 4 THEN ENDPROC
+
+s$ = FNtrim$(FNreadz$(inbuf%))
+IF s$ = "42" THEN
+  PROCshow_dialog("Correct!")
+ELSE
+  PROCshow_dialog("No. Sorry you should read Hitch Hikers Guide To The Galaxy")
+ENDIF
+ENDPROC
+
+REM ================= modal dialog ==========================================
+
+DEF PROCshow_dialog(m$)
+REM Build a tiny dialog window with message + OK. Modal until OK/close.
+LOCAL dlg%, did%, dtitle%, dmsg%, dok%, dval%, dwin%, dstate%
+DIM dlg% 512, dstate% 64
+
+dtitle% = strs% + 1536 : $(dtitle%) = task$ + CHR$(0)                      : REM 1536-1791
+dmsg%   = strs% + 1792 : PROCsetCStr(dmsg%, LEFT$(m$, 250))               : REM 1792-2047
+dok%    = strs% + 2048 : $(dok%) = "OK" + CHR$(0)                         : REM 2048-2303
+dval%   = strs% + 2304 : $(dval%) = "R5,3" + CHR$(0)                      : REM 2304-2559
+
+REM Window (compact)
+dlg%!0  = 0 : dlg%!4  = 0 : dlg%!8  = 440 : dlg%!12 = 120
+dlg%!16 = 0 : dlg%!20 = 0 : dlg%!24 = -1
+dlg%!28 = %10000110000000000011000000010010
+dlg%!32 = &01070207 : dlg%!36 = &000C0103
+dlg%!40 = 0 : dlg%!44 = -120 : dlg%!48 = 440 : dlg%!52 = 0
+
+REM Title
+dlg%!56 = (&27<<24) + %100111101
+dlg%!60 = 0 : dlg%!64 = 1 : dlg%!68 = 0
+dlg%!72 = dtitle% : dlg%!76 = -1 : dlg%!80 = 64
+
+REM Icons: message text + OK button
+dlg%!84 = 2
+dicon% = dlg% + 88
+
+REM Message text (indirected)
+dicon%!0=12 : dicon%!4=-78 : dicon%!8=428 : dicon%!12=-16
+dicon%!16=(&17<<24) + %1100010001
+dicon%!20=dmsg% : dicon%!24=-1 : dicon%!28=252
+
+dicon% += 32
+REM OK action button (plain text for consistency)
+dicon%!0=188 : dicon%!4=-108 : dicon%!8=252 : dicon%!12=-88
+dicon%!16=(&17<<24) + (3<<12) + %100111101
+dicon%!20=dok% : dicon%!24=0 : dicon%!28=8
+
+REM Create + centre relative to screen
+SYS "Wimp_CreateWindow",, dlg% TO dwin%
+
+!dstate% = dwin%
+SYS "Wimp_GetWindowState",, dstate%
+REM centre like main (reuse screen size already read)
+dw% = dstate%!12 - dstate%!4
+dh% = dstate%!16 - dstate%!8
+dstate%!4  = (scrx% - dw%) DIV 2
+dstate%!8  = (scry% - dh%) DIV 2
+dstate%!12 = dstate%!4 + dw%
+dstate%!16 = dstate%!8 + dh%
+dstate%!28 = -1
+SYS "Wimp_OpenWindow",, dstate%
+
+REM Modal loop: wait for OK or dialog close (keep main responsive too)
+did% = FALSE
+REPEAT
+  SYS "Wimp_Poll", 0, ev% TO reason%
+  CASE reason% OF
+    WHEN 1 : PROCredraw(ev%)
+    WHEN 2 : SYS "Wimp_OpenWindow",, ev%
+    WHEN 3 :
+      IF ev%!12 = dwin% THEN did% = TRUE
+      IF ev%!12 = winh% THEN finished% = TRUE : did% = TRUE
+    WHEN 6 :
+      IF ev%!12 = dwin% AND ev%!16 = 1 THEN did% = TRUE  : REM OK button
+  ENDCASE
+UNTIL did%
+
+REM Remove dialog
+SYS "Wimp_DeleteWindow", dwin%
+ENDPROC
+
+REM ================= utilities =============================================
+
+DEF FNreadz$(p%)
+LOCAL i$,i : i$=""
+FOR i=0 TO 255
+  IF ?(p%+i)=0 THEN =i$ ELSE i$+=CHR$(?(p%+i))
+NEXT
+= i$
+
+DEF FNtrim$(s$)
+LOCAL i,j : i=1 : WHILE i<=LEN(s$) AND MID$(s$,i,1)<=" " : i+=1 : ENDWHILE
+j=LEN(s$) : WHILE j>=i AND MID$(s$,j,1)<=" " : j-=1 : ENDWHILE
+= MID$(s$, i, j-i+1)
+
+DEF PROCsetCStr(p%, s$)
+LOCAL i%, n% : n% = LEN(s$)
+FOR i% = 1 TO n% : ?(p% + i% - 1) = ASC(MID$(s$, i%, 1)) : NEXT
+?(p% + n%) = 0
+ENDPROC
+
+DEF PROCfatal
+REM Show basic error in a quick modal dialog, then quit
+PROCshow_dialog(LEFT$(REPORT$,250))
+END

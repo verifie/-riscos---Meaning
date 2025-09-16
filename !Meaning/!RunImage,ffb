@@ -1,0 +1,210 @@
+REM !Meaning.!RunImage — RISC OS WIMP app in BBC BASIC (no !Templates)
+REM Main window with 3-line prompt, input box, standard 'Check' button.
+REM On Check → modal WIMP dialog with the result. Close via main window cross.
+
+ON ERROR PROCfatal
+
+REM ---------- persistent workspace ----------
+DIM win% 512, ev% 512, state% 64, strs% 4096
+finished% = FALSE
+
+task$     = "Meaning"
+title%    = strs% +   0 : $(title%)    = task$ + CHR$(0)
+p1%       = strs% +  64 : $(p1%)       = "What is the meaning of life," + CHR$(0)
+p2%       = strs% + 160 : $(p2%)       = "the universe and" + CHR$(0)
+p3%       = strs% + 256 : $(p3%)       = "everything?" + CHR$(0)
+inbuf%    = strs% + 352 : $(inbuf%)    = CHR$(0) : INLEN% = 64
+checktxt% = strs% + 448 : $(checktxt%) = "Check" + CHR$(0)
+btnval%   = strs% + 512 : $(btnval%)   = "R5,3" + CHR$(0)    : REM standard action-button look
+
+REM ---------- start Wimp ----------
+SYS "Wimp_Initialise", 310, &4B534154, title% TO wimpver%, task%
+
+REM ---------- main window (roomy) ----------
+win%!0 = 0 : win%!4 = 0 : win%!8 = 680 : win%!12 = 220
+win%!16 = 0 : win%!20 = 0 : win%!24 = -1
+win%!28 = %10000110000000000011000000010010   : REM move,title,close,newfmt,auto-redraw
+win%!32 = &01070207 : win%!36 = &000C0103
+win%!40 = 0 : win%!44 = -220 : win%!48 = 680 : win%!52 = 0
+
+REM Title (indirected)
+win%!56 = (&27<<24) + %100111101
+win%!60 = 0 : win%!64 = 1 : win%!68 = 0
+win%!72 = title% : win%!76 = -1 : win%!80 = 64
+
+REM Icons: 3 prompts + input + Check
+win%!84 = 5
+icon% = win% + 88
+
+REM Prompt 1
+icon%!0=16 : icon%!4=-28 : icon%!8=664 : icon%!12=-8
+icon%!16=(&17<<24) + %1100010001
+icon%!20=p1% : icon%!24=-1 : icon%!28=64
+
+icon% += 32
+REM Prompt 2
+icon%!0=16 : icon%!4=-56 : icon%!8=664 : icon%!12=-36
+icon%!16=(&17<<24) + %1100010001
+icon%!20=p2% : icon%!24=-1 : icon%!28=64
+
+icon% += 32
+REM Prompt 3
+icon%!0=16 : icon%!4=-84 : icon%!8=664 : icon%!12=-64
+icon%!16=(&17<<24) + %1100010001
+icon%!20=p3% : icon%!24=-1 : icon%!28=32
+
+icon% += 32
+REM Writable input (indirected)
+icon%!0=16 : icon%!4=-156 : icon%!8=370 : icon%!12=-116
+icon%!16=(&07<<24) + (15<<12) + %100111101
+icon%!20=inbuf% : icon%!24=-1 : icon%!28=INLEN%
+
+icon% += 32
+REM 'Check' action button (validation pointer MUST NOT be 0)
+icon%!0=388 : icon%!4=-156 : icon%!8=488 : icon%!12=-116
+icon%!16=(&17<<24) + (3<<12) + %100111101
+icon%!20=checktxt% : icon%!24=btnval% : icon%!28=16
+
+REM ---------- create, centre, open ----------
+SYS "Wimp_CreateWindow",, win% TO winh%
+
+!state% = winh%
+SYS "Wimp_GetWindowState",, state%
+SYS "OS_ReadModeVariable", -1,  4 TO ,,xeig%
+SYS "OS_ReadModeVariable", -1,  5 TO ,,yeig%
+SYS "OS_ReadModeVariable", -1, 11 TO ,,xres%
+SYS "OS_ReadModeVariable", -1, 12 TO ,,yres%
+
+scrx% = ((xres% + 1) << xeig%)
+scry% = ((yres% + 1) << yeig%)
+w% = state%!12 - state%!4 : h% = state%!16 - state%!8
+state%!4  = (scrx% - w%) DIV 2
+state%!8  = (scry% - h%) DIV 2
+state%!12 = state%!4 + w%
+state%!16 = state%!8 + h%
+state%!28 = -1
+SYS "Wimp_OpenWindow",, state%
+
+REM Caret: R1=window, R2=icon, R3=x, R4=y, R5=height, R6=index
+SYS "Wimp_SetCaretPosition",, winh%, 3, 0, 0, 16, 0
+
+REM ---------- event loop ----------
+REPEAT
+  SYS "Wimp_Poll", 0, ev% TO reason%
+  CASE reason% OF
+    WHEN 1 : PROCredraw(ev%)
+    WHEN 2 : SYS "Wimp_OpenWindow",, ev%
+    WHEN 3 : IF FNwinFromClose(ev%) = winh% THEN finished% = TRUE
+    WHEN 6 : PROCclick(ev%)
+  ENDCASE
+UNTIL finished%
+
+REM CloseDown: R0='TASK', R1=task handle
+SYS "Wimp_CloseDown", &4B534154, task%
+END
+
+REM ================= handlers =================
+
+DEF PROCredraw(b%)
+LOCAL more% : SYS "Wimp_RedrawWindow",, b% TO more%
+WHILE more% : SYS "Wimp_GetRectangle",, b% TO more% : ENDWHILE
+ENDPROC
+
+DEF PROCclick(b%)
+LOCAL w%, ic%
+w%  = FNwinFromClick(b%)
+ic% = FNiconFromClick(b%)
+IF w% <> winh% OR ic% <> 4 THEN ENDPROC
+
+s$ = FNtrim$(FNreadC$(inbuf%))
+IF s$ = "42" THEN
+  PROCmodal_msg("Correct!")
+ELSE
+  PROCmodal_msg("No. Sorry you should read Hitch Hikers Guide To The Galaxy")
+ENDIF
+ENDPROC
+
+REM =============== modal OK dialog =================
+
+DEF PROCmodal_msg(m$)
+LOCAL dlg%, dstate%, dwin%, dtitle%, dmsg%, dok%, dval%, done%
+DIM dlg% 512, dstate% 64
+
+dtitle% = strs% + 2048 : $(dtitle%) = task$ + CHR$(0)
+dmsg%   = strs% + 2304 : $(dmsg%)   = LEFT$(m$,250) + CHR$(0)
+dok%    = strs% + 2620 : $(dok%)    = "OK" + CHR$(0)
+dval%   = strs% + 2640 : $(dval%)   = "R5,3" + CHR$(0)
+
+REM Dialog window
+dlg%!0=0 : dlg%!4=0 : dlg%!8=440 : dlg%!12=120
+dlg%!16=0 : dlg%!20=0 : dlg%!24=-1
+dlg%!28=%10000110000000000011000000010010
+dlg%!32=&01070207 : dlg%!36=&000C0103
+dlg%!40=0 : dlg%!44=-120 : dlg%!48=440 : dlg%!52=0
+
+REM Title
+dlg%!56=(&27<<24)+%100111101 : dlg%!60=0 : dlg%!64=1 : dlg%!68=0
+dlg%!72=dtitle% : dlg%!76=-1 : dlg%!80=64
+
+REM Icons: message (0) + OK (1)
+dlg%!84=2
+dicon% = dlg% + 88
+
+REM Message (indirected)
+dicon%!0=12 : dicon%!4=-78 : dicon%!8=428 : dicon%!12=-16
+dicon%!16=(&17<<24)+%1100010001
+dicon%!20=dmsg% : dicon%!24=-1 : dicon%!28=252
+
+dicon% += 32
+REM OK action button (validation pointer MUST NOT be 0)
+dicon%!0=188 : dicon%!4=-108 : dicon%!8=252 : dicon%!12=-88
+dicon%!16=(&17<<24)+(3<<12)+%100111101
+dicon%!20=dok% : dicon%!24=dval% : dicon%!28=8
+
+SYS "Wimp_CreateWindow",, dlg% TO dwin%
+
+!dstate% = dwin%
+SYS "Wimp_GetWindowState",, dstate%
+dw% = dstate%!12 - dstate%!4 : dh% = dstate%!16 - dstate%!8
+dstate%!4  = (scrx% - dw%) DIV 2
+dstate%!8  = (scry% - dh%) DIV 2
+dstate%!12 = dstate%!4 + dw%
+dstate%!16 = dstate%!8 + dh%
+dstate%!28 = -1
+SYS "Wimp_OpenWindow",, dstate%
+
+done% = FALSE
+REPEAT
+  SYS "Wimp_Poll", 0, ev% TO reason%
+  CASE reason% OF
+    WHEN 1 : PROCredraw(ev%)
+    WHEN 2 : SYS "Wimp_OpenWindow",, ev%
+    WHEN 3 :
+      IF FNwinFromClose(ev%) = dwin% THEN done% = TRUE
+      IF FNwinFromClose(ev%) = winh% THEN finished% = TRUE : done% = TRUE
+    WHEN 6 :
+      IF FNwinFromClick(ev%) = dwin% AND FNiconFromClick(ev%) = 1 THEN done% = TRUE
+  ENDCASE
+UNTIL done%
+
+REM DeleteWindow: R1 = handle
+SYS "Wimp_DeleteWindow",, dwin%
+ENDPROC
+
+REM ================= utilities =================
+
+DEF FNwinFromClose(b%)  : LOCAL w% : w% = b%!12 : IF w%=0 THEN w%=b%!0 : =w%
+DEF FNwinFromClick(b%)  : LOCAL w% : w% = b%!12 : IF (w%=0 OR w%=-1) THEN w%=b%!0 : =w%
+DEF FNiconFromClick(b%) : LOCAL i% : i% = b%!16 : IF i%=-1 THEN i% = b%!4 : =i%
+
+DEF FNreadC$(p%) : LOCAL i%,s$ : s$="" : FOR i%=0 TO 255 : IF ?(p%+i%)=0 THEN =s$ ELSE s$+=CHR$(?(p%+i%)) : NEXT : =s$
+
+DEF FNtrim$(s$)
+LOCAL i%, j% : i%=1 : WHILE i%<=LEN(s$) AND MID$(s$,i%,1)<=" " : i%+=1 : ENDWHILE
+j%=LEN(s$) : WHILE j%>=i% AND MID$(s$,j%,1)<=" " : j%-=1 : ENDWHILE
+= MID$(s$, i%, j%-i%+1)
+
+DEF PROCfatal
+REM minimal fallback if launched in a TaskWindow
+PRINT REPORT$
+END

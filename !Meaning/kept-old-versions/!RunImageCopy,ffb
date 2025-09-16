@@ -1,0 +1,96 @@
+REM !Meaning.!RunImage  — BBC BASIC WIMP app
+
+ON ERROR PROCerr
+
+REM --- Workspace ------------------------------------------------------------
+DIM t% 1024, b% 256, state% 64
+DIM idata% 256
+indbase% = idata%         : REM start of indirected data (writable field buffer)
+task% = 0
+quit% = FALSE
+
+REM --- Register as a Wimp task ---------------------------------------------
+SYS "Wimp_Initialise", 310, &4B534154, "Meaning", t% TO , task%
+
+REM --- Load the 'Main' window from !Templates and create it -----------------
+SYS "Wimp_OpenTemplate",,"<Obey$Dir>.!Templates"
+SYS "Wimp_LoadTemplate",, t%, indbase%, indbase%+256, -1, "Main", 0
+SYS "Wimp_CreateWindow",, t% TO win%
+SYS "Wimp_CloseTemplate"
+
+REM --- Open the window at its default position ------------------------------
+!state% = win%
+SYS "Wimp_GetWindowState",, state%
+SYS "Wimp_OpenWindow",, state%
+
+REM Put caret in the writable icon (icon 1)
+SYS "Wimp_SetCaretPosition", win%, 1, 0, 0, 16, 0
+
+REM --- Poll loop -------------------------------------------------------------
+REPEAT
+  SYS "Wimp_Poll", &2301, b% TO reason%
+  CASE reason% OF
+    WHEN 2 : SYS "Wimp_OpenWindow",, b%                : REM OpenWindow
+    WHEN 3 : IF b%!12 = win% THEN quit% = TRUE         : REM CloseWindow
+    WHEN 6 : PROCmouse(b%)                              : REM Mouse_Click
+    WHEN 17,18 : IF b%!16 = 0 OR b%!16 = 2 THEN quit% = TRUE  : REM Message_Quit
+  ENDCASE
+UNTIL quit%
+
+SYS "Wimp_CloseDown", task%, &4B534154
+END
+
+REM --- Event handlers --------------------------------------------------------
+
+DEF PROCmouse(b%)
+LOCAL w, ic, btn
+w   = b%!12            : REM window handle
+ic  = b%!8             : REM icon number
+btn = b%!16            : REM button state
+
+IF w <> win% THEN ENDPROC
+IF (btn AND 1) = 0 THEN ENDPROC        : REM Only handle Select clicks
+
+IF ic = 2 THEN
+  s$ = FNreadz$(indbase%)              : REM read text from input buffer
+  s$ = FNtrim$(s$)
+  IF s$ = "42" THEN
+    PROCmsg("Correct!")
+  ELSE
+    PROCmsg("No. Sorry you should read Hitch Hikers Guide To The Galaxy")
+  ENDIF
+ELSE IF ic = 3 THEN
+  quit% = TRUE
+ENDIF
+ENDPROC
+
+REM --- Helpers ---------------------------------------------------------------
+
+DEF FNreadz$(p%)                        : REM read zero-terminated C string
+LOCAL i, ch, s$
+s$ = ""
+FOR i = 0 TO 255
+  ch = ?(p%+i)
+  IF ch = 0 THEN = s$
+  s$ += CHR$(ch)
+NEXT
+= s$
+
+DEF FNtrim$(s$)
+LOCAL i, j
+i = 1 : WHILE i<=LEN(s$) AND MID$(s$,i,1) <= " " : i += 1 : ENDWHILE
+j = LEN(s$) : WHILE j>=i AND MID$(s$,j,1) <= " " : j -= 1 : ENDWHILE
+= MID$(s$, i, j-i+1)
+
+DEF PROCmsg(m$)
+LOCAL er%
+DIM er% 256
+er%!0 = 0
+$(er%+4) = m$
+SYS "Wimp_ReportError",, er%, 1, "Meaning"
+ENDPROC
+
+DEF PROCerr
+LOCAL e$ : e$ = REPORT$
+SYS "Wimp_ReportError",,, e$, 1, "Meaning"
+END
